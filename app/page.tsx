@@ -31,43 +31,21 @@ type DevwatchData = {
   };
 
   dev: {
-    probableCreator:
-      | string
-      | null;
-
+    probableCreator: string | null;
     source: string;
     confidence: string;
 
-    solBalance:
-      | number
-      | null;
+    solBalance: number | null;
+    tokenBalance: number | null;
+    percentSupply: number | null;
 
-    tokenBalance:
-      | number
-      | null;
+    createdAt: number | null;
 
-    percentSupply:
-      | number
-      | null;
+    mintAuthority: string | null;
+    freezeAuthority: string | null;
+    updateAuthority: string | null;
 
-    createdAt:
-      | number
-      | null;
-
-    mintAuthority:
-      | string
-      | null;
-
-    freezeAuthority:
-      | string
-      | null;
-
-    updateAuthority:
-      | string
-      | null;
-
-    recentActivity:
-      RecentActivity[];
+    recentActivity: RecentActivity[];
   };
 
   analysis: {
@@ -80,10 +58,7 @@ type FlowWindow = {
   buys: number;
   sells: number;
   total: number;
-
-  buySharePct:
-    | number
-    | null;
+  buySharePct: number | null;
 };
 
 type FlowData = {
@@ -92,37 +67,18 @@ type FlowData = {
   referencePair: {
     dex: string;
 
-    pairAddress:
-      | string
-      | null;
+    pairAddress: string | null;
 
-    baseSymbol:
-      | string
-      | null;
+    baseSymbol: string | null;
+    quoteSymbol: string | null;
 
-    quoteSymbol:
-      | string
-      | null;
+    priceUsd: number | null;
+    liquidityUsd: number | null;
 
-    priceUsd:
-      | number
-      | null;
+    marketCap: number | null;
+    fdv: number | null;
 
-    liquidityUsd:
-      | number
-      | null;
-
-    marketCap:
-      | number
-      | null;
-
-    fdv:
-      | number
-      | null;
-
-    pairCreatedAt:
-      | number
-      | null;
+    pairCreatedAt: number | null;
   };
 
   flow: {
@@ -140,70 +96,43 @@ type FlowData = {
   };
 
   priceChange: {
-    m5:
-      | number
-      | null;
-
-    h1:
-      | number
-      | null;
-
-    h6:
-      | number
-      | null;
-
-    h24:
-      | number
-      | null;
+    m5: number | null;
+    h1: number | null;
+    h6: number | null;
+    h24: number | null;
   };
 
   verdict: string;
-
   pairCount: number;
-
   note: string;
-};
-
-type ExitQuote = {
-  sizeUsd: number;
-  tokensIn: number;
-
-  solOut:
-    | number
-    | null;
-
-  priceImpactPct:
-    | number
-    | null;
-
-  routeAvailable: boolean;
-
-  error:
-    | string
-    | null;
 };
 
 type ExitData = {
   mint: string;
 
+  positionUsd: number;
+
   tokenPriceUsd: number;
 
-  decimals: number;
+  tokensIn?: number;
 
   market: {
     dex: string;
-
-    liquidityUsd:
-      | number
-      | null;
   };
 
-  quotes:
-    ExitQuote[];
+  routeAvailable: boolean;
 
-  verdict: string;
+  estimatedReceiveUsd: number | null;
 
-  note: string;
+  priceImpactPct: number | null;
+
+  rating: string;
+
+  output?: string;
+
+  error?: string;
+
+  note?: string;
 };
 
 const tabs: {
@@ -214,20 +143,17 @@ const tabs: {
   {
     id: "devwatch",
     label: "DEVWATCH",
-    subtitle:
-      "Who launched it?",
+    subtitle: "Who launched it?",
   },
   {
     id: "buyers",
     label: "BUY FLOW",
-    subtitle:
-      "Buyers vs sellers",
+    subtitle: "Buyers vs sellers",
   },
   {
     id: "exit",
     label: "EXIT",
-    subtitle:
-      "Can you get out?",
+    subtitle: "Can you get out?",
   },
 ];
 
@@ -235,8 +161,7 @@ export default function Home() {
   const [
     contract,
     setContract,
-  ] =
-    useState("");
+  ] = useState("");
 
   const [
     activeTab,
@@ -249,14 +174,12 @@ export default function Home() {
   const [
     loading,
     setLoading,
-  ] =
-    useState(false);
+  ] = useState(false);
 
   const [
     error,
     setError,
-  ] =
-    useState("");
+  ] = useState("");
 
   const [
     devwatch,
@@ -277,8 +200,12 @@ export default function Home() {
   const [
     flowError,
     setFlowError,
-  ] =
-    useState("");
+  ] = useState("");
+
+  const [
+    exitAmount,
+    setExitAmount,
+  ] = useState("500");
 
   const [
     exitData,
@@ -291,42 +218,43 @@ export default function Home() {
   const [
     exitLoading,
     setExitLoading,
-  ] =
-    useState(false);
+  ] = useState(false);
 
   const [
     exitError,
     setExitError,
-  ] =
-    useState("");
+  ] = useState("");
 
-  async function loadExit(
-    mint: string,
-    force = false
-  ) {
-    if (exitLoading) {
+  async function calculateExit() {
+    if (!devwatch) {
       return;
     }
 
+    const amount =
+      Number(exitAmount);
+
     if (
-      !force &&
-      exitData?.mint ===
-        mint
+      !Number.isFinite(amount) ||
+      amount <= 0
     ) {
+      setExitError(
+        "ENTER A VALID POSITION SIZE."
+      );
+
       return;
     }
 
     try {
-      setExitLoading(
-        true
-      );
-
+      setExitLoading(true);
       setExitError("");
+      setExitData(null);
 
       const response =
         await fetch(
           `/api/exit?mint=${encodeURIComponent(
-            mint
+            devwatch.mint
+          )}&amount=${encodeURIComponent(
+            String(amount)
           )}`,
           {
             cache:
@@ -354,25 +282,14 @@ export default function Home() {
           : "EXIT SCAN FAILED."
       );
     } finally {
-      setExitLoading(
-        false
-      );
+      setExitLoading(false);
     }
   }
 
-  async function selectTab(
+  function selectTab(
     tab: ScanTab
   ) {
     setActiveTab(tab);
-
-    if (
-      tab === "exit" &&
-      devwatch
-    ) {
-      await loadExit(
-        devwatch.mint
-      );
-    }
   }
 
   async function handleScan(
@@ -448,9 +365,7 @@ export default function Home() {
           flowResponse.json(),
         ]);
 
-      if (
-        !devResponse.ok
-      ) {
+      if (!devResponse.ok) {
         throw new Error(
           devData.error ??
             "DEVWATCH FAILED."
@@ -461,9 +376,7 @@ export default function Home() {
         devData as DevwatchData
       );
 
-      if (
-        flowResponse.ok
-      ) {
+      if (flowResponse.ok) {
         setFlow(
           flowData as FlowData
         );
@@ -471,16 +384,6 @@ export default function Home() {
         setFlowError(
           flowData.error ??
             "BUY FLOW FAILED."
-        );
-      }
-
-      if (
-        activeTab ===
-        "exit"
-      ) {
-        await loadExit(
-          mint,
-          true
         );
       }
     } catch (err) {
@@ -562,16 +465,12 @@ export default function Home() {
               )
             }
             placeholder="PASTE SOLANA CONTRACT ADDRESS"
-            spellCheck={
-              false
-            }
+            spellCheck={false}
             autoComplete="off"
           />
 
           <button
-            disabled={
-              loading
-            }
+            disabled={loading}
           >
             {loading
               ? "SCANNING..."
@@ -592,9 +491,7 @@ export default function Home() {
               index
             ) => (
               <button
-                key={
-                  tab.id
-                }
+                key={tab.id}
                 type="button"
                 onClick={() =>
                   selectTab(
@@ -609,22 +506,16 @@ export default function Home() {
                 }
               >
                 <span className="module-number">
-                  0
-                  {index +
-                    1}
+                  0{index + 1}
                 </span>
 
                 <div>
                   <strong>
-                    {
-                      tab.label
-                    }
+                    {tab.label}
                   </strong>
 
                   <small>
-                    {
-                      tab.subtitle
-                    }
+                    {tab.subtitle}
                   </small>
                 </div>
 
@@ -651,9 +542,7 @@ export default function Home() {
               <strong>
                 {
                   tabs.find(
-                    (
-                      tab
-                    ) =>
+                    (tab) =>
                       tab.id ===
                       activeTab
                   )?.label
@@ -664,10 +553,8 @@ export default function Home() {
             <span>
               {loading
                 ? "SCANNING CHAIN..."
-                : exitLoading &&
-                    activeTab ===
-                      "exit"
-                  ? "QUOTING ROUTES..."
+                : exitLoading
+                  ? "QUOTING EXIT..."
                   : devwatch
                     ? "LIVE DATA"
                     : "WAITING FOR TOKEN"}
@@ -679,8 +566,7 @@ export default function Home() {
               <div className="scanner-line" />
 
               <p>
-                READING
-                ON-CHAIN
+                READING ON-CHAIN
                 ACTIVITY...
               </p>
             </div>
@@ -702,8 +588,7 @@ export default function Home() {
 
                 <p>
                   PASTE A TOKEN
-                  CONTRACT
-                  ABOVE.
+                  CONTRACT ABOVE.
                 </p>
               </div>
             )}
@@ -714,8 +599,7 @@ export default function Home() {
                 <div className="token-header">
                   <div>
                     <p>
-                      TARGET
-                      TOKEN
+                      TARGET TOKEN
                     </p>
 
                     <h2>
@@ -746,18 +630,14 @@ export default function Home() {
                 {activeTab ===
                   "devwatch" && (
                     <DevwatchPanel
-                      data={
-                        devwatch
-                      }
+                      data={devwatch}
                     />
                   )}
 
                 {activeTab ===
                   "buyers" && (
                     <FlowPanel
-                      data={
-                        flow
-                      }
+                      data={flow}
                       error={
                         flowError
                       }
@@ -767,6 +647,15 @@ export default function Home() {
                 {activeTab ===
                   "exit" && (
                     <ExitPanel
+                      amount={
+                        exitAmount
+                      }
+                      setAmount={
+                        setExitAmount
+                      }
+                      calculate={
+                        calculateExit
+                      }
                       data={
                         exitData
                       }
@@ -790,8 +679,7 @@ export default function Home() {
         </span>
 
         <span>
-          VERIFY
-          EVERYTHING.
+          VERIFY EVERYTHING.
         </span>
       </footer>
     </main>
@@ -803,8 +691,7 @@ function DevwatchPanel({
 }: {
   data: DevwatchData;
 }) {
-  const dev =
-    data.dev;
+  const dev = data.dev;
 
   return (
     <div className="data-section">
@@ -823,8 +710,7 @@ function DevwatchPanel({
         <Stat
           label="SOL BALANCE"
           value={
-            dev.solBalance !==
-            null
+            dev.solBalance !== null
               ? `${formatNumber(
                   dev.solBalance,
                   3
@@ -836,8 +722,7 @@ function DevwatchPanel({
         <Stat
           label="TOKEN HELD"
           value={
-            dev.tokenBalance !==
-            null
+            dev.tokenBalance !== null
               ? `${formatCompact(
                   dev.tokenBalance
                 )}${
@@ -856,19 +741,14 @@ function DevwatchPanel({
         <Stat
           label="LAST ACTION"
           value={
-            dev.recentActivity[
-              0
-            ]
+            dev.recentActivity[0]
               ? `${
                   dev
-                    .recentActivity[
-                    0
-                  ].type
+                    .recentActivity[0]
+                    .type
                 } / ${timeAgo(
                   dev
-                    .recentActivity[
-                    0
-                  ]
+                    .recentActivity[0]
                     .timestamp
                 )}`
               : "NO DATA"
@@ -879,7 +759,9 @@ function DevwatchPanel({
       <div className="intel-row">
         <Intel
           label="INFERENCE CONFIDENCE"
-          value={dev.confidence.toUpperCase()}
+          value={
+            dev.confidence.toUpperCase()
+          }
         />
 
         <Intel
@@ -931,10 +813,7 @@ function FlowPanel({
   data,
   error,
 }: {
-  data:
-    | FlowData
-    | null;
-
+  data: FlowData | null;
   error: string;
 }) {
   if (error) {
@@ -979,8 +858,7 @@ function FlowPanel({
           label="1H BUY COUNT SHARE"
           value={
             data.flow.h1
-              .buySharePct !==
-            null
+              .buySharePct !== null
               ? `${formatNumber(
                   data.flow.h1
                     .buySharePct,
@@ -996,11 +874,9 @@ function FlowPanel({
           label="LIQUIDITY"
           value={
             data.referencePair
-              .liquidityUsd !==
-            null
+              .liquidityUsd !== null
               ? formatUsdCompact(
-                  data
-                    .referencePair
+                  data.referencePair
                     .liquidityUsd
                 )
               : "UNKNOWN"
@@ -1011,11 +887,9 @@ function FlowPanel({
           label="MARKET CAP"
           value={
             data.referencePair
-              .marketCap !==
-            null
+              .marketCap !== null
               ? formatUsdCompact(
-                  data
-                    .referencePair
+                  data.referencePair
                     .marketCap
                 )
               : "UNKNOWN"
@@ -1024,7 +898,9 @@ function FlowPanel({
 
         <Intel
           label="REFERENCE DEX"
-          value={data.referencePair.dex.toUpperCase()}
+          value={
+            data.referencePair.dex.toUpperCase()
+          }
         />
 
         <Intel
@@ -1034,9 +910,7 @@ function FlowPanel({
 
         <Intel
           label="FLOW VERDICT"
-          value={
-            data.verdict
-          }
+          value={data.verdict}
         />
       </div>
 
@@ -1048,145 +922,193 @@ function FlowPanel({
         BUY/SELL VALUES ARE
         TRANSACTION COUNTS,
         NOT UNIQUE WALLET
-        COUNTS OR BUY/SELL
-        DOLLAR VOLUME.
+        COUNTS.
       </div>
     </div>
   );
 }
 
 function ExitPanel({
+  amount,
+  setAmount,
+  calculate,
   data,
   loading,
   error,
 }: {
-  data:
-    | ExitData
-    | null;
+  amount: string;
+
+  setAmount:
+    React.Dispatch<
+      React.SetStateAction<string>
+    >;
+
+  calculate: () => void;
+
+  data: ExitData | null;
 
   loading: boolean;
 
   error: string;
 }) {
-  if (loading) {
-    return (
-      <div className="empty-screen">
-        <div className="scanner-line" />
-
-        <p>
-          QUOTING LIVE EXIT
-          ROUTES...
-        </p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <Placeholder
-        title="EXIT SCAN FAILED"
-        body={error}
-      />
-    );
-  }
-
-  if (!data) {
-    return (
-      <Placeholder
-        title="EXIT"
-        body="CLICK EXIT TO LOAD LIVE ROUTES."
-      />
-    );
-  }
-
   return (
     <div className="data-section">
-      <div className="stats">
-        {data.quotes.map(
-          (quote) => (
-            <Stat
-              key={
-                quote.sizeUsd
-              }
-              label={`$${formatNumber(
-                quote.sizeUsd,
-                0
-              )} EXIT${
-                quote.priceImpactPct !==
-                null
-                  ? ` / ${formatNumber(
-                      quote.priceImpactPct,
-                      2
-                    )}% IMPACT`
-                  : ""
-              }`}
-              value={
-                quote.routeAvailable &&
-                quote.solOut !==
-                  null
-                  ? `${formatNumber(
-                      quote.solOut,
-                      4
-                    )} SOL`
-                  : "NO ROUTE"
-              }
-            />
-          )
-        )}
-      </div>
+      <div
+        className="search"
+        style={{
+          margin: "18px",
+        }}
+      >
+        <span className="search-label">
+          POSITION $
+        </span>
 
-      <div className="intel-row">
-        <Intel
-          label="TOKEN PRICE"
-          value={
-            formatUsd(
-              data.tokenPriceUsd
+        <input
+          value={amount}
+          onChange={(e) =>
+            setAmount(
+              e.target.value.replace(
+                /[^0-9.]/g,
+                ""
+              )
             )
           }
+          placeholder="500"
+          inputMode="decimal"
         />
 
-        <Intel
-          label="POOL LIQUIDITY"
-          value={
-            data.market
-              .liquidityUsd !==
-            null
-              ? formatUsdCompact(
-                  data.market
-                    .liquidityUsd
-                )
-              : "UNKNOWN"
-          }
-        />
-
-        <Intel
-          label="REFERENCE DEX"
-          value={
-            data.market.dex.toUpperCase()
-          }
-        />
-
-        <Intel
-          label="EXIT VERDICT"
-          value={
-            data.verdict
-          }
-        />
-
-        <Intel
-          label="QUOTE DESTINATION"
-          value="SOL"
-        />
+        <button
+          type="button"
+          onClick={calculate}
+          disabled={loading}
+        >
+          {loading
+            ? "CALCULATING..."
+            : "CALCULATE EXIT →"}
+        </button>
       </div>
 
-      <div className="warning">
-        LIVE JUPITER ROUTE
-        ESTIMATES. PRICE IMPACT
-        IS A SNAPSHOT AND CAN
-        CHANGE BEFORE EXECUTION.
-        ROUTES ARE ESTIMATES,
-        NOT GUARANTEED FILLS.
-      </div>
+      {error && (
+        <div className="error">
+          {error}
+        </div>
+      )}
+
+      {!data &&
+        !loading && (
+          <Placeholder
+            title="YOUR POSITION"
+            body="ENTER THE APPROXIMATE USD VALUE OF YOUR POSITION ABOVE."
+          />
+        )}
+
+      {loading && (
+        <div className="empty-screen">
+          <div className="scanner-line" />
+
+          <p>
+            QUOTING LIVE SELL
+            ROUTE...
+          </p>
+        </div>
+      )}
+
+      {data &&
+        !loading && (
+          <>
+            <div className="stats">
+              <Stat
+                label="YOUR POSITION"
+                value={formatUsd(
+                  data.positionUsd
+                )}
+              />
+
+              <Stat
+                label="EST. RECEIVE"
+                value={
+                  data.routeAvailable &&
+                  data.estimatedReceiveUsd !==
+                    null
+                    ? formatUsd(
+                        data.estimatedReceiveUsd
+                      )
+                    : "NO ROUTE"
+                }
+              />
+
+              <Stat
+                label="PRICE IMPACT"
+                value={
+                  data.priceImpactPct !==
+                  null
+                    ? `${formatNumber(
+                        data.priceImpactPct,
+                        2
+                      )}%`
+                    : "—"
+                }
+              />
+
+              <Stat
+                label="EXIT RATING"
+                value={
+                  data.rating
+                }
+              />
+            </div>
+
+            <div className="intel-row">
+              <Intel
+                label="TOKEN PRICE"
+                value={formatUsd(
+                  data.tokenPriceUsd
+                )}
+              />
+
+              <Intel
+                label="MARKET"
+                value={
+                  data.market.dex.toUpperCase()
+                }
+              />
+
+              <Intel
+                label="ROUTE"
+                value="TOKEN → USDC"
+              />
+
+              <Intel
+                label="QUOTE STATUS"
+                value={
+                  data.routeAvailable
+                    ? "LIVE ROUTE"
+                    : "NO ROUTE"
+                }
+              />
+
+              <Intel
+                label="OUTPUT"
+                value="USDC"
+              />
+            </div>
+
+            <div className="warning">
+              YOUR POSITION VALUE IS
+              APPROXIMATED USING THE
+              CURRENT REFERENCE PRICE.
+              EST. RECEIVE IS WHAT THE
+              CURRENT LIVE JUPITER ROUTE
+              ESTIMATES YOU COULD RECEIVE
+              IN USDC FOR THAT TOKEN
+              AMOUNT. THIS IS NOT A FEE
+              OR GUARANTEED LOSS. PRICES,
+              ROUTING, AND PRICE IMPACT
+              CAN CHANGE BEFORE
+              EXECUTION.
+            </div>
+          </>
+        )}
     </div>
   );
 }
@@ -1200,13 +1122,8 @@ function Stat({
 }) {
   return (
     <div className="stat">
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -1220,13 +1137,8 @@ function Intel({
 }) {
   return (
     <div className="intel">
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -1240,13 +1152,8 @@ function Placeholder({
 }) {
   return (
     <div className="placeholder">
-      <h2>
-        {title}
-      </h2>
-
-      <p>
-        {body}
-      </p>
+      <h2>{title}</h2>
+      <p>{body}</p>
     </div>
   );
 }
@@ -1254,18 +1161,14 @@ function Placeholder({
 function shorten(
   value: string
 ) {
-  if (
-    value.length <= 18
-  ) {
+  if (value.length <= 18) {
     return value;
   }
 
   return `${value.slice(
     0,
     7
-  )}...${value.slice(
-    -7
-  )}`;
+  )}...${value.slice(-7)}`;
 }
 
 function formatNumber(
@@ -1287,9 +1190,7 @@ function formatCompact(
   return new Intl.NumberFormat(
     "en-US",
     {
-      notation:
-        "compact",
-
+      notation: "compact",
       maximumFractionDigits:
         2,
     }
@@ -1305,7 +1206,6 @@ function formatUsdCompact(
       style: "currency",
       currency: "USD",
       notation: "compact",
-
       maximumFractionDigits:
         2,
     }
@@ -1315,8 +1215,11 @@ function formatUsdCompact(
 function formatUsd(
   value: number
 ) {
-  if (value < 0.01) {
-    return `$${value.toPrecision(
+  const absolute =
+    Math.abs(value);
+
+  if (absolute < 0.01) {
+    return `$${absolute.toPrecision(
       4
     )}`;
   }
@@ -1326,11 +1229,10 @@ function formatUsd(
     {
       style: "currency",
       currency: "USD",
-
       maximumFractionDigits:
         2,
     }
-  ).format(value);
+  ).format(absolute);
 }
 
 function formatDate(
@@ -1375,9 +1277,7 @@ function timeAgo(
       )
     );
 
-  if (
-    seconds < 60
-  ) {
+  if (seconds < 60) {
     return `${seconds}S AGO`;
   }
 
@@ -1386,9 +1286,7 @@ function timeAgo(
       seconds / 60
     );
 
-  if (
-    minutes < 60
-  ) {
+  if (minutes < 60) {
     return `${minutes}M AGO`;
   }
 
@@ -1397,9 +1295,7 @@ function timeAgo(
       minutes / 60
     );
 
-  if (
-    hours < 24
-  ) {
+  if (hours < 24) {
     return `${hours}H AGO`;
   }
 

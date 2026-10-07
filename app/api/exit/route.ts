@@ -1,20 +1,11 @@
-import {
-  NextRequest,
-  NextResponse,
-} from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const BASE58 =
-  /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-const WSOL =
-  "So11111111111111111111111111111111111111112";
+const USDC =
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
-const EXIT_SIZES = [
-  100,
-  500,
-  1000,
-  5000,
-];
+const USDC_DECIMALS = 6;
 
 type MintAccountResponse = {
   result?: {
@@ -31,97 +22,72 @@ type MintAccountResponse = {
 };
 
 type DexPair = {
-  chainId?: string;
   dexId?: string;
 
   baseToken?: {
     address?: string;
   };
 
-  quoteToken?: {
-    address?: string;
-  };
-
-  priceUsd?:
-    | string
-    | null;
+  priceUsd?: string | null;
 
   liquidity?: {
-    usd?:
-      | number
-      | null;
-  };
+    usd?: number | null;
+  } | null;
 };
 
 type JupiterQuote = {
   outAmount?: string;
   priceImpactPct?: string;
-
-  routePlan?: unknown[];
-
   error?: string;
-  errorCode?: string;
 };
 
-type ExitResult = {
-  sizeUsd: number;
-
-  tokensIn: number;
-
-  solOut:
-    | number
-    | null;
-
-  priceImpactPct:
-    | number
-    | null;
-
-  routeAvailable: boolean;
-
-  error:
-    | string
-    | null;
-};
-
-function sleep(
-  ms: number
+function getRating(
+  impact: number | null,
+  routeAvailable: boolean
 ) {
-  return new Promise(
-    (resolve) =>
-      setTimeout(
-        resolve,
-        ms
-      )
-  );
+  if (!routeAvailable) return "NO ROUTE";
+  if (impact === null) return "UNKNOWN";
+
+  if (impact < 1) return "EXCELLENT";
+  if (impact < 3) return "GOOD";
+  if (impact < 5) return "OK";
+  if (impact < 10) return "THIN";
+  if (impact < 20) return "HIGH RISK";
+
+  return "SEVERE";
 }
 
-export async function GET(
-  request: NextRequest
-) {
+export async function GET(request: NextRequest) {
   try {
     const mint =
-      request.nextUrl
-        .searchParams
-        .get("mint")
-        ?.trim() ?? "";
+      request.nextUrl.searchParams.get("mint")?.trim() ?? "";
+
+    const amountParam =
+      request.nextUrl.searchParams.get("amount")?.trim() ?? "";
+
+    const positionUsd = Number(amountParam);
 
     if (!mint) {
       return NextResponse.json(
-        {
-          error:
-            "Missing mint.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Missing mint." },
+        { status: 400 }
       );
     }
 
     if (!BASE58.test(mint)) {
       return NextResponse.json(
+        { error: "Invalid Solana mint." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      !Number.isFinite(positionUsd) ||
+      positionUsd <= 0
+    ) {
+      return NextResponse.json(
         {
-          error:
-            "Invalid Solana mint.",
+          error: "Enter a valid position size.",
         },
         {
           status: 400,
@@ -129,110 +95,84 @@ export async function GET(
       );
     }
 
-    const heliusKey =
-      process.env
-        .HELIUS_API_KEY;
+    if (positionUsd > 1_000_000) {
+      return NextResponse.json(
+        {
+          error: "Position size is too large.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
-    const jupiterKey =
-      process.env
-        .JUPITER_API_KEY;
+    const heliusKey = process.env.HELIUS_API_KEY;
+    const jupiterKey = process.env.JUPITER_API_KEY;
 
     if (!heliusKey) {
       return NextResponse.json(
-        {
-          error:
-            "HELIUS_API_KEY missing.",
-        },
-        {
-          status: 500,
-        }
+        { error: "HELIUS_API_KEY missing." },
+        { status: 500 }
       );
     }
 
     if (!jupiterKey) {
       return NextResponse.json(
-        {
-          error:
-            "JUPITER_API_KEY missing.",
-        },
-        {
-          status: 500,
-        }
+        { error: "JUPITER_API_KEY missing." },
+        { status: 500 }
       );
     }
 
-    /*
-     * --------------------------------
-     * GET TOKEN DECIMALS
-     * --------------------------------
-     */
+    // TOKEN DECIMALS
 
-    const mintResponse =
-      await fetch(
-        `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`,
-        {
-          method: "POST",
+    const mintResponse = await fetch(
+      `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`,
+      {
+        method: "POST",
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+        headers: {
+          "Content-Type": "application/json",
+        },
 
-          body: JSON.stringify({
-            jsonrpc: "2.0",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "scan-exit",
+          method: "getAccountInfo",
 
-            id: "scan-exit",
+          params: [
+            mint,
+            {
+              encoding: "jsonParsed",
+              commitment: "confirmed",
+            },
+          ],
+        }),
 
-            method:
-              "getAccountInfo",
-
-            params: [
-              mint,
-
-              {
-                encoding:
-                  "jsonParsed",
-
-                commitment:
-                  "confirmed",
-              },
-            ],
-          }),
-
-          cache: "no-store",
-        }
-      );
+        cache: "no-store",
+      }
+    );
 
     if (!mintResponse.ok) {
       return NextResponse.json(
         {
-          error:
-            `Helius returned ${mintResponse.status}.`,
+          error: `Helius returned ${mintResponse.status}.`,
         },
         {
-          status:
-            mintResponse.status,
+          status: mintResponse.status,
         }
       );
     }
 
     const mintData =
-      (await mintResponse.json()) as
-        MintAccountResponse;
+      (await mintResponse.json()) as MintAccountResponse;
 
     const decimals =
-      mintData.result?.value
-        ?.data?.parsed?.info
-        ?.decimals;
+      mintData.result?.value?.data?.parsed?.info?.decimals;
 
-    if (
-      typeof decimals !==
-      "number"
-    ) {
+    if (typeof decimals !== "number") {
       return NextResponse.json(
         {
-          error:
-            "Could not determine token decimals.",
+          error: "Could not determine token decimals.",
         },
         {
           status: 422,
@@ -240,35 +180,23 @@ export async function GET(
       );
     }
 
-    /*
-     * --------------------------------
-     * GET MARKET PRICE
-     * --------------------------------
-     *
-     * DexScreener gives us a current
-     * USD reference price so we can
-     * calculate how many tokens roughly
-     * represent $100 / $500 / etc.
-     */
+    // USD REFERENCE PRICE
 
-    const dexResponse =
-      await fetch(
-        `https://api.dexscreener.com/token-pairs/v1/solana/${mint}`,
-        {
-          cache: "no-store",
+    const dexResponse = await fetch(
+      `https://api.dexscreener.com/token-pairs/v1/solana/${mint}`,
+      {
+        cache: "no-store",
 
-          headers: {
-            Accept:
-              "application/json",
-          },
-        }
-      );
+        headers: {
+          Accept: "application/json",
+        },
+      }
+    );
 
     if (!dexResponse.ok) {
       return NextResponse.json(
         {
-          error:
-            "Could not load market price.",
+          error: "Could not load token market data.",
         },
         {
           status: 502,
@@ -276,19 +204,12 @@ export async function GET(
       );
     }
 
-    const pairs =
-      (await dexResponse.json()) as
-        DexPair[];
+    const pairs = (await dexResponse.json()) as DexPair[];
 
-    if (
-      !Array.isArray(
-        pairs
-      )
-    ) {
+    if (!Array.isArray(pairs) || pairs.length === 0) {
       return NextResponse.json(
         {
-          error:
-            "No market data found.",
+          error: "No market data found.",
         },
         {
           status: 404,
@@ -296,44 +217,25 @@ export async function GET(
       );
     }
 
-    /*
-     * priceUsd describes the
-     * base token, so only use pools
-     * where our token is base.
-     *
-     * Prefer the deepest pool.
-     */
+    const usablePairs = pairs
+      .filter(
+        (pair) =>
+          pair.baseToken?.address === mint &&
+          pair.priceUsd &&
+          Number(pair.priceUsd) > 0
+      )
+      .sort(
+        (a, b) =>
+          (b.liquidity?.usd ?? 0) -
+          (a.liquidity?.usd ?? 0)
+      );
 
-    const usablePairs =
-      pairs
-        .filter(
-          (pair) =>
-            pair.baseToken
-              ?.address ===
-              mint &&
-            pair.priceUsd &&
-            Number(
-              pair.priceUsd
-            ) > 0
-        )
-        .sort(
-          (a, b) =>
-            (b.liquidity
-              ?.usd ??
-              0) -
-            (a.liquidity
-              ?.usd ??
-              0)
-        );
-
-    const bestPair =
-      usablePairs[0];
+    const bestPair = usablePairs[0];
 
     if (!bestPair) {
       return NextResponse.json(
         {
-          error:
-            "No usable USD market price found for this token.",
+          error: "No usable USD market price found.",
         },
         {
           status: 404,
@@ -341,21 +243,15 @@ export async function GET(
       );
     }
 
-    const tokenPriceUsd =
-      Number(
-        bestPair.priceUsd
-      );
+    const tokenPriceUsd = Number(bestPair.priceUsd);
 
     if (
-      !Number.isFinite(
-        tokenPriceUsd
-      ) ||
+      !Number.isFinite(tokenPriceUsd) ||
       tokenPriceUsd <= 0
     ) {
       return NextResponse.json(
         {
-          error:
-            "Token price is unavailable.",
+          error: "Token price unavailable.",
         },
         {
           status: 422,
@@ -363,366 +259,169 @@ export async function GET(
       );
     }
 
-    /*
-     * --------------------------------
-     * JUPITER EXIT QUOTES
-     * --------------------------------
-     */
+    // CONVERT USER POSITION INTO APPROX TOKEN AMOUNT
 
-    const results:
-      ExitResult[] = [];
+    const tokensIn =
+      positionUsd / tokenPriceUsd;
 
-    for (
-      let index = 0;
-      index <
-      EXIT_SIZES.length;
-      index++
-    ) {
-      const sizeUsd =
-        EXIT_SIZES[index];
-
-      const tokensIn =
-        sizeUsd /
-        tokenPriceUsd;
-
-      const rawAmount =
-        Math.floor(
-          tokensIn *
-            Math.pow(
-              10,
-              decimals
-            )
-        );
-
-      if (
-        !Number.isFinite(
-          rawAmount
-        ) ||
-        rawAmount <= 0
-      ) {
-        results.push({
-          sizeUsd,
-
-          tokensIn,
-
-          solOut: null,
-
-          priceImpactPct:
-            null,
-
-          routeAvailable:
-            false,
-
-          error:
-            "Invalid quote amount.",
-        });
-
-        continue;
-      }
-
-      /*
-       * Jupiter free tier:
-       * keep the requests spaced out.
-       */
-
-      if (index > 0) {
-        await sleep(
-          1100
-        );
-      }
-
-      const quoteUrl =
-        new URL(
-          "https://api.jup.ag/swap/v1/quote"
-        );
-
-      quoteUrl.searchParams.set(
-        "inputMint",
-        mint
-      );
-
-      quoteUrl.searchParams.set(
-        "outputMint",
-        WSOL
-      );
-
-      quoteUrl.searchParams.set(
-        "amount",
-        String(rawAmount)
-      );
-
-      quoteUrl.searchParams.set(
-        "slippageBps",
-        "100"
-      );
-
-      quoteUrl.searchParams.set(
-        "instructionVersion",
-        "V2"
-      );
-
-      try {
-        const quoteResponse =
-          await fetch(
-            quoteUrl.toString(),
-            {
-              headers: {
-                "x-api-key":
-                  jupiterKey,
-              },
-
-              cache:
-                "no-store",
-            }
-          );
-
-        const rawQuote =
-          await quoteResponse.text();
-
-        if (
-          !quoteResponse.ok
-        ) {
-          results.push({
-            sizeUsd,
-
-            tokensIn,
-
-            solOut:
-              null,
-
-            priceImpactPct:
-              null,
-
-            routeAvailable:
-              false,
-
-            error:
-              `Jupiter ${quoteResponse.status}`,
-          });
-
-          continue;
-        }
-
-        let quote:
-          JupiterQuote;
-
-        try {
-          quote =
-            JSON.parse(
-              rawQuote
-            );
-        } catch {
-          results.push({
-            sizeUsd,
-
-            tokensIn,
-
-            solOut:
-              null,
-
-            priceImpactPct:
-              null,
-
-            routeAvailable:
-              false,
-
-            error:
-              "Invalid Jupiter response.",
-          });
-
-          continue;
-        }
-
-        if (
-          quote.error ||
-          !quote.outAmount
-        ) {
-          results.push({
-            sizeUsd,
-
-            tokensIn,
-
-            solOut:
-              null,
-
-            priceImpactPct:
-              null,
-
-            routeAvailable:
-              false,
-
-            error:
-              quote.error ??
-              "No route.",
-          });
-
-          continue;
-        }
-
-        const solOut =
-          Number(
-            quote.outAmount
-          ) /
-          1_000_000_000;
-
-        /*
-         * Jupiter documents
-         * priceImpactPct as a decimal.
-         *
-         * 0.01 = 1%
-         */
-
-        const rawImpact =
-          Number(
-            quote.priceImpactPct ??
-              0
-          );
-
-        const impactPct =
-          Number.isFinite(
-            rawImpact
-          )
-            ? rawImpact *
-              100
-            : null;
-
-        results.push({
-          sizeUsd,
-
-          tokensIn,
-
-          solOut,
-
-          priceImpactPct:
-            impactPct,
-
-          routeAvailable:
-            true,
-
-          error: null,
-        });
-      } catch (
-        quoteError
-      ) {
-        results.push({
-          sizeUsd,
-
-          tokensIn,
-
-          solOut: null,
-
-          priceImpactPct:
-            null,
-
-          routeAvailable:
-            false,
-
-          error:
-            quoteError instanceof
-            Error
-              ? quoteError.message
-              : "Quote failed.",
-        });
-      }
-    }
-
-    /*
-     * --------------------------------
-     * SIMPLE ROUTE VERDICT
-     * --------------------------------
-     */
-
-    const available =
-      results.filter(
-        (result) =>
-          result.routeAvailable
-      );
-
-    const impacts =
-      available
-        .map(
-          (result) =>
-            result.priceImpactPct
-        )
-        .filter(
-          (
-            impact
-          ): impact is number =>
-            impact !== null
-        );
-
-    const worstImpact =
-      impacts.length
-        ? Math.max(
-            ...impacts
-          )
-        : null;
-
-    let verdict =
-      "NO ROUTE";
+    const rawAmount = Math.floor(
+      tokensIn * Math.pow(10, decimals)
+    );
 
     if (
-      available.length ===
-      results.length
+      !Number.isFinite(rawAmount) ||
+      rawAmount <= 0
     ) {
-      if (
-        worstImpact ===
-        null
-      ) {
-        verdict =
-          "ROUTABLE";
-      } else if (
-        worstImpact < 1
-      ) {
-        verdict =
-          "DEEP";
-      } else if (
-        worstImpact < 3
-      ) {
-        verdict =
-          "GOOD";
-      } else if (
-        worstImpact < 8
-      ) {
-        verdict =
-          "THIN";
-      } else {
-        verdict =
-          "SEVERE IMPACT";
-      }
-    } else if (
-      available.length > 0
-    ) {
-      verdict =
-        "LIMITED";
+      return NextResponse.json(
+        {
+          error: "Could not calculate token amount.",
+        },
+        {
+          status: 422,
+        }
+      );
     }
+
+    // LIVE TOKEN -> USDC QUOTE
+
+    const quoteUrl = new URL(
+      "https://api.jup.ag/swap/v1/quote"
+    );
+
+    quoteUrl.searchParams.set("inputMint", mint);
+    quoteUrl.searchParams.set("outputMint", USDC);
+    quoteUrl.searchParams.set("amount", String(rawAmount));
+    quoteUrl.searchParams.set("slippageBps", "100");
+    quoteUrl.searchParams.set(
+      "instructionVersion",
+      "V2"
+    );
+
+    const quoteResponse = await fetch(
+      quoteUrl.toString(),
+      {
+        headers: {
+          "x-api-key": jupiterKey,
+        },
+
+        cache: "no-store",
+      }
+    );
+
+    const rawQuote = await quoteResponse.text();
+
+    if (!quoteResponse.ok) {
+      console.error("Jupiter error:", rawQuote);
+
+      return NextResponse.json(
+        {
+          error: `Jupiter returned ${quoteResponse.status}.`,
+        },
+        {
+          status: quoteResponse.status,
+        }
+      );
+    }
+
+    let quote: JupiterQuote;
+
+    try {
+      quote = JSON.parse(rawQuote);
+    } catch {
+      return NextResponse.json(
+        {
+          error: "Jupiter returned an invalid response.",
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
+    if (quote.error || !quote.outAmount) {
+      return NextResponse.json(
+        {
+          mint,
+          positionUsd,
+          tokenPriceUsd,
+
+          market: {
+            dex: bestPair.dexId ?? "UNKNOWN",
+          },
+
+          routeAvailable: false,
+
+          estimatedReceiveUsd: null,
+          priceImpactPct: null,
+          rating: "NO ROUTE",
+
+          error:
+            quote.error ??
+            "No sell route available.",
+        },
+        {
+          status: 200,
+        }
+      );
+    }
+
+    const estimatedReceiveUsd =
+      Number(quote.outAmount) /
+      Math.pow(10, USDC_DECIMALS);
+
+    const rawImpact =
+      Number(quote.priceImpactPct ?? 0);
+
+    const priceImpactPct =
+      Number.isFinite(rawImpact)
+        ? rawImpact * 100
+        : null;
+
+    const differenceUsd =
+      estimatedReceiveUsd - positionUsd;
+
+    const differencePct =
+      positionUsd > 0
+        ? (differenceUsd / positionUsd) * 100
+        : 0;
+
+    const rating =
+      getRating(
+        priceImpactPct,
+        true
+      );
 
     return NextResponse.json({
       mint,
 
+      positionUsd,
+
       tokenPriceUsd,
 
-      decimals,
+      tokensIn,
 
       market: {
         dex:
           bestPair.dexId ??
           "UNKNOWN",
-
-        liquidityUsd:
-          bestPair
-            .liquidity
-            ?.usd ??
-          null,
       },
 
-      quotes:
-        results,
+      routeAvailable: true,
 
-      verdict,
+      estimatedReceiveUsd,
+
+      priceImpactPct,
+
+      differenceUsd,
+
+      differencePct,
+
+      rating,
+
+      output: "USDC",
 
       note:
-        "Quotes are live routing snapshots, not guaranteed execution prices.",
+        "Position size is approximate based on the current reference USD price. Jupiter output is a live routing estimate and not a guaranteed fill.",
     });
   } catch (error) {
     console.error(
@@ -733,8 +432,7 @@ export async function GET(
     return NextResponse.json(
       {
         error:
-          error instanceof
-          Error
+          error instanceof Error
             ? error.message
             : "Exit analysis failed.",
       },
